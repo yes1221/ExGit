@@ -1,0 +1,203 @@
+import sqlite3
+import random
+import string
+import tkinter as tk
+from tkinter import messagebox
+from tkinter import simpledialog
+
+# Conectar a la base de datos
+conn = sqlite3.connect('C:\Proyecto\Hospital.db')
+
+# Función para generar un código personal aleatorio para pacientes nuevos
+def generar_codigo():
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+
+# Función para verificar si el paciente existe y devolver su ID
+def verificar_paciente(codigo):
+    cursor = conn.execute("SELECT id FROM pacientes WHERE codigo=?", (codigo,))
+    paciente = cursor.fetchone()
+    if paciente:
+        return paciente[0]
+    else:
+        return None
+
+# Función para agregar un nuevo paciente
+def agregar_paciente(nombre, edad):
+    codigo = generar_codigo()
+    conn.execute("INSERT INTO pacientes (codigo, nombre, edad) VALUES (?, ?, ?)", (codigo, nombre, edad))
+    conn.commit()
+    messagebox.showinfo("Éxito", "Paciente agregado con éxito. Su código personal es: " + codigo)
+    return codigo  # Devolver el código generado
+
+# Función para obtener los doctores disponibles
+def obtener_doctores():
+    cursor = conn.execute("SELECT nombre, especialidad FROM doctores")
+    doctores = cursor.fetchall()
+    return doctores
+
+# Función para agregar una cita para un paciente existente
+def agregar_cita(codigo, fecha, hora, doctor):
+    paciente_id = verificar_paciente(codigo)
+    if paciente_id:
+        conn.execute("INSERT INTO citas (paciente_id, fecha, hora, doctor) VALUES (?, ?, ?, ?)", (paciente_id, fecha, hora, doctor))
+        conn.commit()
+        messagebox.showinfo("Éxito", "Cita agregada con éxito para el paciente con código: " + codigo)
+    else:
+        messagebox.showerror("Error", "El paciente con el código proporcionado no existe.")
+
+# Función para ver todas las citas de un paciente
+def ver_citas(codigo):
+    paciente_id = verificar_paciente(codigo)
+    if paciente_id:
+        cursor = conn.execute("SELECT fecha, hora, doctor FROM citas WHERE paciente_id=?", (paciente_id,))
+        citas = cursor.fetchall()
+        if citas:
+            messagebox.showinfo("Citas del paciente", "\n".join([f"Fecha: {cita[0]}, Hora: {cita[1]}, Doctor: {cita[2]}" for cita in citas]))
+        else:
+            messagebox.showinfo("Citas del paciente", "El paciente no tiene citas registradas.")
+    else:
+        messagebox.showerror("Error", "El paciente con el código proporcionado no existe.")
+
+# Función para cancelar una cita de un paciente
+def cancelar_cita(codigo):
+    paciente_id = verificar_paciente(codigo)
+    if paciente_id:
+        cursor = conn.execute("SELECT fecha, hora, doctor FROM citas WHERE paciente_id=?", (paciente_id,))
+        citas = cursor.fetchall()
+        if citas:
+            # Mostrar citas del paciente y permitir que el usuario seleccione una para cancelar
+            cancelar_cita_seleccionada(codigo, citas)
+        else:
+            messagebox.showinfo("Información", "El paciente no tiene citas registradas.")
+    else:
+        messagebox.showerror("Error", "El paciente con el código proporcionado no existe.")
+
+def cancelar_cita_seleccionada(codigo, citas):
+    # Crear una ventana emergente para que el usuario seleccione la cita a cancelar
+    cancelar_window = tk.Toplevel()
+    cancelar_window.title("Seleccione la cita a cancelar")
+
+    selected_cita = tk.StringVar(cancelar_window)
+    selected_cita.set(citas[0])  # Seleccionar la primera cita por defecto
+
+    citas_listbox = tk.Listbox(cancelar_window, selectmode=tk.SINGLE)
+    for cita in citas:
+        citas_listbox.insert(tk.END, f"Fecha: {cita[0]}, Hora: {cita[1]}, Doctor: {cita[2]}")
+    citas_listbox.pack()
+
+    def cancelar_cita_seleccionada_handler():
+        selected_index = citas_listbox.curselection()
+        if selected_index:
+            selected_cita_info = citas[selected_index[0]]
+            fecha, hora = selected_cita_info[0], selected_cita_info[1]
+            cancelar_cita_individual(codigo, fecha, hora)
+            cancelar_window.destroy()
+
+    cancelar_button = tk.Button(cancelar_window, text="Cancelar cita seleccionada", command=cancelar_cita_seleccionada_handler)
+    cancelar_button.pack()
+
+def cancelar_cita_individual(codigo, fecha, hora):
+    paciente_id = verificar_paciente(codigo)
+    if paciente_id:
+        conn.execute("DELETE FROM citas WHERE paciente_id=? AND fecha=? AND hora=?", (paciente_id, fecha, hora))
+        conn.commit()
+        messagebox.showinfo("Éxito", "Cita cancelada con éxito para el paciente con código: " + codigo)
+    else:
+        messagebox.showerror("Error", "El paciente con el código proporcionado no existe.")
+
+# Función para agregar los doctores predefinidos en la base de datos
+def agregar_doctores_predefinidos():
+    doctores = [
+        ("Dr. Juan Pérez", "General"),
+        ("Dra. María García", "Dermatólogo"),
+        ("Dr. Carlos López", "Otra especialidad")
+    ]
+    conn.executemany("INSERT INTO doctores (nombre, especialidad) VALUES (?, ?)", doctores)
+    conn.commit()
+
+# Agregar los doctores predefinidos al iniciar la aplicación
+agregar_doctores_predefinidos()
+
+# Función para limpiar los datos introducidos
+def limpiar_datos(codigo_entry, fecha_entry, hora_entry):
+    codigo_entry.delete(0, tk.END)
+    fecha_entry.delete(0, tk.END)
+    hora_entry.delete(0, tk.END)
+
+# Función para eliminar todos los registros de la base de datos
+def limpiar_registros():
+    conn.execute("DELETE FROM pacientes")
+    conn.execute("DELETE FROM doctores")
+    conn.execute("DELETE FROM citas")
+    conn.commit()
+
+# Función principal de la aplicación
+def main():
+    root = tk.Tk()
+    root.title("Hospital")
+
+    # Verificar si el paciente es nuevo o no
+    respuesta = messagebox.askquestion("Bienvenido", "¿Es su primera vez en el hospital?")
+    if respuesta == 'yes':
+        # Solicitar nombre y edad al paciente
+        nombre = simpledialog.askstring("Nombre", "Por favor, ingrese su nombre:")
+        edad = simpledialog.askinteger("Edad", "Por favor, ingrese su edad:")
+        codigo = agregar_paciente(nombre, edad)
+    else:
+        codigo = simpledialog.askstring("Código", "Por favor, ingrese su código personal:")
+
+    # Si el paciente no proporciona un código personal, finalizar la aplicación
+    if not codigo:
+        return
+
+    # Obtener los doctores disponibles
+    doctores = obtener_doctores()
+    nombres_doctores = [doctor[0] + " - " + doctor[1] for doctor in doctores]
+
+    # Crear etiquetas y campos de entrada para la interfaz gráfica
+    tk.Label(root, text="Código del paciente:").grid(row=0, column=0)
+    codigo_entry = tk.Entry(root)
+    codigo_entry.grid(row=0, column=1)
+    codigo_entry.insert(0, codigo)
+
+    tk.Label(root, text="Fecha de la cita (YYYY-MM-DD):").grid(row=1, column=0)
+    fecha_entry = tk.Entry(root)
+    fecha_entry.grid(row=1, column=1)
+
+    tk.Label(root, text="Hora de la cita (HH:MM):").grid(row=2, column=0)
+    hora_entry = tk.Entry(root)
+    hora_entry.grid(row=2, column=1)
+
+    tk.Label(root, text="Doctor:").grid(row=3, column=0)
+    doctor_var = tk.StringVar(root)
+    doctor_var.set(nombres_doctores[0])  # Por defecto, selecciona el primer doctor de la lista
+    doctor_option_menu = tk.OptionMenu(root, doctor_var, *nombres_doctores)
+    doctor_option_menu.grid(row=3, column=1)
+
+    # Función para manejar el botón de agregar cita
+    def agregar_cita_handler():
+        agregar_cita(codigo_entry.get(), fecha_entry.get(), hora_entry.get(), doctor_var.get().split(" - ")[0])
+        limpiar_datos(codigo_entry, fecha_entry, hora_entry)
+
+    agregar_button = tk.Button(root, text="Agregar cita", command=agregar_cita_handler)
+    agregar_button.grid(row=4, column=0)
+
+    # Botón para ver citas
+    ver_button = tk.Button(root, text="Ver citas", command=lambda: ver_citas(codigo_entry.get()))
+    ver_button.grid(row=4, column=1)
+
+    # Botón para cancelar cita
+    cancelar_button = tk.Button(root, text="Cancelar cita", command=lambda: cancelar_cita(codigo_entry.get()))
+    cancelar_button.grid(row=4, column=2)
+
+    # Botón para salir
+    salir_button = tk.Button(root, text="Salir", command=lambda: [limpiar_registros(), root.destroy()])
+    salir_button.grid(row=5, column=0)
+
+    root.mainloop()
+
+# Ejecutar la aplicación
+main()
+
+# Cerrar la conexión
+conn.close()
